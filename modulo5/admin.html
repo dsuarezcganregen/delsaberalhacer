@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Módulo 5 · Administración · Del Saber al Hacer</title>
+<link rel="icon" href="../logo_del_saber_al_hacer.jpg">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+<div class="envoltura">
+  <header class="cabeza">
+    <img src="../logo_del_saber_al_hacer.jpg" alt="Del Saber al Hacer">
+    <div>
+      <p class="sup">Del Saber al Hacer · Módulo 5</p>
+      <h1>Hojas de los alumnos</h1>
+    </div>
+  </header>
+
+  <!-- Acceso -->
+  <section id="vista-acceso" class="oculto">
+    <div class="tarjeta">
+      <p>Entra con tu correo. Te llega un enlace; ábrelo desde este mismo navegador.</p>
+      <form id="form-acceso">
+        <label class="campo" for="correo">Correo</label>
+        <input type="text" id="correo" autocomplete="email" inputmode="email">
+        <p style="margin-top:14px"><button class="boton" id="btn-acceso" type="submit">Mandarme el enlace</button></p>
+      </form>
+      <div id="aviso-acceso" class="aviso oculto"></div>
+    </div>
+  </section>
+
+  <!-- Lista -->
+  <section id="vista-lista" class="oculto">
+    <div class="tarjeta no-imprimir">
+      <h2>Enlace para un alumno</h2>
+      <p class="ayuda">Escribe su nombre y el rancho: el enlace le llega con esos datos ya puestos.</p>
+      <div class="tres" style="grid-template-columns:1fr 1fr auto;align-items:end">
+        <label>Alumno<input type="text" id="enl-alumno"></label>
+        <label>Rancho<input type="text" id="enl-rancho"></label>
+        <button class="boton chico" id="enl-copiar" type="button">Copiar enlace</button>
+      </div>
+      <p id="enl-salida" class="ayuda" style="word-break:break-all;margin-top:8px"></p>
+    </div>
+    <div class="tarjeta">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <h2 style="margin:0">Hojas recibidas</h2>
+        <span>
+          <button class="boton secundario chico" id="csv" type="button">Descargar resumen (CSV)</button>
+          <button class="boton secundario chico" id="salir" type="button">Salir</button>
+        </span>
+      </div>
+      <ul class="lista-admin" id="lista"></ul>
+      <p id="vacio" class="ayuda oculto" style="margin-top:12px">Todavía no llega ninguna hoja.</p>
+    </div>
+  </section>
+
+  <!-- Una hoja -->
+  <section id="vista-hoja" class="oculto">
+    <p class="no-imprimir" style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="boton secundario chico" id="volver" type="button">← Volver a la lista</button>
+      <button class="boton chico" id="imprimir" type="button">Guardar en PDF</button>
+      <button class="boton secundario chico" id="borrar" type="button" style="border-color:var(--rojo);color:var(--rojo)">Borrar esta hoja</button>
+    </p>
+    <div id="hoja"></div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="contenido.js"></script>
+<script src="hoja.js"></script>
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const sb = supabase.createClient(DSAH.url, DSAH.clave);
+  let filas = [];
+  let actual = null;
+
+  function ver(id) {
+    ["vista-acceso", "vista-lista", "vista-hoja"].forEach(v => $(v).classList.toggle("oculto", v !== id));
+    window.scrollTo(0, 0);
+  }
+  function mostrarAcceso(msg, esError) {
+    ver("vista-acceso");
+    $("correo").value = $("correo").value || DSAH.correoAdmin;
+    const a = $("aviso-acceso");
+    if (msg) { a.textContent = msg; a.classList.toggle("error", !!esError); a.classList.remove("oculto"); }
+    else a.classList.add("oculto");
+  }
+
+  $("form-acceso").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const correo = $("correo").value.trim();
+    if (!correo) return;
+    $("btn-acceso").disabled = true;
+    const { error } = await sb.auth.signInWithOtp({ email: correo, options: { emailRedirectTo: location.href.split("#")[0].split("?")[0] } });
+    $("btn-acceso").disabled = false;
+    if (error) return mostrarAcceso(/rate|seconds|security/i.test(error.message) ? "Ya se mandó un enlace hace poco. Espera un minuto." : "No se pudo mandar el enlace: " + error.message, true);
+    mostrarAcceso(`Te mandamos un enlace a ${correo}. Ábrelo desde este mismo navegador. Si te lleva a la administración de preguntas, vuelve a esta página y recárgala: ya vas a estar dentro.`);
+  });
+
+  $("salir").addEventListener("click", async () => { await sb.auth.signOut(); mostrarAcceso("Saliste de la administración."); });
+
+  const fecha = iso => new Date(iso).toLocaleString("es-MX", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  async function cargar() {
+    const { data, error } = await sb.from(DSAH.tabla).select("id, creado, alumno, rancho, respuestas").order("creado", { ascending: false });
+    if (error) return mostrarAcceso("No se pudieron leer las hojas: " + error.message, true);
+    filas = data || [];
+    // Si un alumno envió varias veces, la más reciente va primero y las anteriores se marcan.
+    const vistos = new Set();
+    $("lista").innerHTML = filas.map(f => {
+      const clave = (f.alumno || "").trim().toLowerCase() + "|" + (f.rancho || "").trim().toLowerCase();
+      const anterior = vistos.has(clave); vistos.add(clave);
+      return `<li>
+        <span><span class="quien">${esc(f.alumno)}</span>${f.rancho ? " · " + esc(f.rancho) : ""}<br>
+        <span class="cuando">${fecha(f.creado)}${anterior ? " · versión anterior" : ""}</span></span>
+        <button class="boton chico" data-abrir="${f.id}" type="button">Abrir</button>
+      </li>`;
+    }).join("");
+    $("vacio").classList.toggle("oculto", filas.length > 0);
+    ver("vista-lista");
+  }
+
+  $("lista").addEventListener("click", ev => {
+    const id = ev.target.dataset.abrir;
+    if (!id) return;
+    actual = filas.find(f => f.id === id);
+    if (!actual) return;
+    $("hoja").innerHTML = armarHoja(actual.respuestas);
+    ver("vista-hoja");
+  });
+  $("volver").addEventListener("click", () => ver("vista-lista"));
+  $("imprimir").addEventListener("click", () => window.print());
+  window.addEventListener("beforeprint", () => document.querySelectorAll("details").forEach(d => d.open = true));
+
+  $("borrar").addEventListener("click", async () => {
+    if (!actual) return;
+    if (!confirm(`¿Borrar la hoja de ${actual.alumno} del ${fecha(actual.creado)}? No se puede deshacer.`)) return;
+    const { error } = await sb.from(DSAH.tabla).delete().eq("id", actual.id);
+    if (error) return alert("No se pudo borrar: " + error.message);
+    actual = null;
+    cargar();
+  });
+
+  // Enlace personalizado para un alumno
+  $("enl-copiar").addEventListener("click", async () => {
+    const base = location.href.split("#")[0].split("?")[0].replace(/admin\.html$/, "");
+    const p = new URLSearchParams();
+    if ($("enl-alumno").value.trim()) p.set("alumno", $("enl-alumno").value.trim());
+    if ($("enl-rancho").value.trim()) p.set("rancho", $("enl-rancho").value.trim());
+    const enlace = base + (p.toString() ? "?" + p.toString() : "");
+    $("enl-salida").textContent = enlace;
+    try { await navigator.clipboard.writeText(enlace); $("enl-salida").textContent = enlace + "  (copiado)"; } catch (e) {}
+  });
+
+  // Resumen en CSV: una fila por hoja, un escalón por práctica
+  $("csv").addEventListener("click", () => {
+    const celda = v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+    const cab = ["Fecha", "Alumno", "Rancho", "Temporada"].concat(M5.practicas.map(p => p.nombre), ["Técnico hoy %", "Gerente hoy %", "Empresario hoy %"]);
+    const lineas = [cab.map(celda).join(",")];
+    filas.forEach(f => {
+      const r = f.respuestas || {};
+      const t = M5.temporadas.find(x => x.id === (r.momento || {}).temporada);
+      const d = M5.distribucion((r.roles || {}).tareas);
+      const esc_ = M5.practicas.map(p => {
+        const e = ((r.practicas || {})[p.id] || {}).escalon;
+        return e === 0 ? "No aplica" : (e || "");
+      });
+      lineas.push([fecha(f.creado), f.alumno, f.rancho || "", t ? t.nombre : ""].concat(esc_, d ? [d.T, d.G, d.E] : ["", "", ""]).map(celda).join(","));
+    });
+    const blob = new Blob(["﻿" + lineas.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "modulo5-resumen.csv"; a.click();
+  });
+
+  sb.auth.onAuthStateChange((evento, session) => {
+    if (evento === "SIGNED_IN" && session) cargar();
+  });
+  sb.auth.getSession().then(({ data }) => {
+    if (!data.session) return mostrarAcceso();
+    if ((data.session.user.email || "").toLowerCase() !== DSAH.correoAdmin) return mostrarAcceso("Esta página es solo para Daniel.", true);
+    cargar();
+  });
+})();
+</script>
+</body>
+</html>

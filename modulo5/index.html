@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Módulo 5 · Dónde está parado tu rancho · Del Saber al Hacer</title>
+<link rel="icon" href="../logo_del_saber_al_hacer.jpg">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+<div class="envoltura">
+  <header class="cabeza">
+    <img src="../logo_del_saber_al_hacer.jpg" alt="Del Saber al Hacer">
+    <div>
+      <p class="sup">Del Saber al Hacer · Módulo 5</p>
+      <h1>Dónde está parado tu rancho</h1>
+    </div>
+  </header>
+
+  <nav class="pasos" id="pasos" aria-label="Pasos"></nav>
+  <main id="paso"></main>
+  <div id="resultado" class="oculto"></div>
+</div>
+
+<div class="navegacion" id="navegacion">
+  <button class="boton secundario chico" id="atras" type="button">Atrás</button>
+  <span class="guardado" id="guardado"></span>
+  <button class="boton chico" id="siguiente" type="button">Siguiente</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="contenido.js"></script>
+<script src="hoja.js"></script>
+<script>
+(function () {
+  const CLAVE_BORRADOR = "dsah_m5_borrador";
+  const CLAVE_ENVIADA = "dsah_m5_enviada";
+  const PASOS = ["Tus datos", "Momento del año", "Prácticas", "Tres Roles", "Enviar"];
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // ---------- Estado ----------
+  function hoy() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  function nuevo() {
+    return {
+      version: 1, alumno: "", rancho: "", ubicacion: "", negocios: [],
+      momento: { fecha: hoy(), temporada: "", dejo_de_crecer: "", vuelve_a_crecer: "", manejos: {}, otro: "" },
+      practicas: {},
+      roles: {
+        tareas: Array.from({ length: 8 }, () => ({ tarea: "", rol: "", horas: "" })),
+        patrones: {}, energia: {}, base: { T: "", G: "", E: "" }, compromiso: { T: "", G: "", E: "" },
+        dejo: [{ texto: "", logro: "" }, { texto: "", logro: "" }, { texto: "", logro: "" }],
+        empiezo: [{ texto: "", logro: "" }, { texto: "", logro: "" }, { texto: "", logro: "" }],
+        reflexion: "",
+      },
+      comentario: "",
+    };
+  }
+  function leer(clave) { try { const v = localStorage.getItem(clave); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
+  function escribir(clave, v) { try { localStorage.setItem(clave, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  function borrar(clave) { try { localStorage.removeItem(clave); } catch (e) {} }
+
+  let r = leer(CLAVE_BORRADOR) || nuevo();
+  let paso = 0;
+
+  const params = new URLSearchParams(location.search);
+  if (!r.alumno && params.get("alumno")) r.alumno = params.get("alumno").slice(0, 120);
+  if (!r.rancho && params.get("rancho")) r.rancho = params.get("rancho").slice(0, 160);
+
+  function obtener(ruta) {
+    return ruta.split(".").reduce((o, k) => (o == null ? undefined : o[k]), r);
+  }
+  function poner(ruta, valor) {
+    const partes = ruta.split(".");
+    let o = r;
+    partes.slice(0, -1).forEach((k, i) => {
+      if (o[k] == null || typeof o[k] !== "object") o[k] = /^\d+$/.test(partes[i + 1]) ? [] : {};
+      o = o[k];
+    });
+    o[partes[partes.length - 1]] = valor;
+  }
+
+  let temporizador;
+  function guardar() {
+    clearTimeout(temporizador);
+    temporizador = setTimeout(() => {
+      const ok = escribir(CLAVE_BORRADOR, r);
+      $("guardado").textContent = ok ? "Guardado en este dispositivo" : "";
+    }, 300);
+  }
+
+  // ---------- Piezas de interfaz ----------
+  function radio(ruta, valor, contenido, extraClase) {
+    const marcado = String(obtener(ruta)) === String(valor) && obtener(ruta) !== "" && obtener(ruta) != null;
+    return `<label class="opcion${marcado ? " marcada" : ""}${extraClase ? " " + extraClase : ""}">
+      <input type="radio" name="${esc(ruta)}" data-k="${esc(ruta)}" value="${esc(valor)}"${marcado ? " checked" : ""}>
+      <span>${contenido}</span></label>`;
+  }
+  function texto(ruta, placeholder, largo) {
+    const v = esc(obtener(ruta) || "");
+    return largo
+      ? `<textarea data-k="${esc(ruta)}" placeholder="${esc(placeholder || "")}">${v}</textarea>`
+      : `<input type="text" data-k="${esc(ruta)}" value="${v}" placeholder="${esc(placeholder || "")}">`;
+  }
+  function selectorMes(ruta, conTodavia) {
+    const v = String(obtener(ruta) == null ? "" : obtener(ruta));
+    let h = `<select data-k="${esc(ruta)}"><option value="">Escoge el mes</option>`;
+    if (conTodavia) h += `<option value="todavia"${v === "todavia" ? " selected" : ""}>Todavía está creciendo</option>`;
+    M5.meses.forEach((m, i) => { h += `<option value="${i}"${v === String(i) ? " selected" : ""}>${m}</option>`; });
+    return h + "</select>";
+  }
+  function selectorRol(ruta) {
+    const v = obtener(ruta) || "";
+    let h = `<select data-k="${esc(ruta)}" aria-label="Rol"><option value="">Rol</option>`;
+    M5.roles.forEach(x => { h += `<option value="${x.id}"${v === x.id ? " selected" : ""}>${x.icono} ${x.nombre}</option>`; });
+    return h + "</select>";
+  }
+
+  // ---------- Pasos ----------
+  function pasoDatos() {
+    return `
+      <div class="indicacion">
+        <p>Esta hoja muestra dónde está parado tu rancho hoy en cada práctica que trabajamos en el programa. Con ella armamos juntos el plan de los siguientes seis meses, en el Módulo 6.</p>
+        <p>Marca lo que de verdad pasa hoy en tu rancho, aunque no sea lo que te gustaría. Te va a tomar unos 30 minutos.</p>
+        <p style="margin:0">Lo que escribes se guarda solo en este teléfono o computadora hasta que lo envíes. Puedes dejarla a medias y volver después desde el mismo aparato.</p>
+      </div>
+      <div class="tarjeta">
+        <label class="campo">Tu nombre</label>${texto("alumno", "Nombre y apellido")}
+        <label class="campo">Nombre del rancho</label>${texto("rancho", "Ej. Rancho El Encino")}
+        <label class="campo">Ubicación <span class="ayuda">Municipio y estado o departamento</span></label>${texto("ubicacion", "Ej. Huimanguillo, Tabasco")}
+        <label class="campo">¿Qué negocio tienes? <span class="ayuda">Marca todos los que tengas.</span></label>
+        <div class="opciones">
+          ${M5.negocios.map(n => {
+            const m = (r.negocios || []).includes(n.id);
+            return `<label class="opcion${m ? " marcada" : ""}"><input type="checkbox" data-arr="negocios" value="${n.id}"${m ? " checked" : ""}><span>${n.nombre}</span></label>`;
+          }).join("")}
+        </div>
+      </div>`;
+  }
+
+  function pasoMomento() {
+    return `
+      <div class="indicacion"><p style="margin:0">El plan de los siguientes seis meses depende de en qué parte del año estás. No es lo mismo planear con el pasto creciendo que con el pasto parado.</p></div>
+      <div class="tarjeta">
+        <label class="campo">Fecha de hoy</label>
+        <input type="date" data-k="momento.fecha" value="${esc(r.momento.fecha || "")}">
+        <label class="campo">¿En qué temporada está tu rancho hoy?</label>
+        <div class="opciones">${M5.temporadas.map(t => radio("momento.temporada", t.id, `<b>${t.nombre}.</b> ${t.ayuda}`)).join("")}</div>
+        <label class="campo">¿En qué mes dejó de crecer el pasto?</label>
+        ${selectorMes("momento.dejo_de_crecer", true)}
+        <label class="campo">¿En qué mes esperas que vuelva a crecer?</label>
+        ${selectorMes("momento.vuelve_a_crecer", false)}
+      </div>
+      <div class="tarjeta">
+        <h3 style="margin-top:0">¿Qué le viene a tu hato en los próximos seis meses?</h3>
+        <p class="ayuda">Escribe cuándo pasa cada cosa. Deja en blanco lo que no te toca en estos meses.</p>
+        ${M5.manejos.map(m => `<div class="manejo"><span>${m.nombre}</span>${texto("momento.manejos." + m.id, "Ej. marzo a mayo")}</div>`).join("")}
+        <div class="manejo"><span>Otro</span>${texto("momento.otro", "Ej. vacunación en febrero")}</div>
+      </div>`;
+  }
+
+  function pasoPracticas() {
+    const lista = M5.practicasPara(r.negocios);
+    return `
+      <div class="indicacion">
+        <p>Para cada práctica, escoge el escalón que describe mejor tu rancho <b>hoy</b>. Si la práctica no tiene que ver con tu negocio, marca "No aplica".</p>
+        <p style="margin:0">Abajo de cada una escribe el dato que lo respalda. Con ese dato revisamos juntos el escalón en la sesión.</p>
+      </div>
+      ${lista.map(p => {
+        const ruta = "practicas." + p.id;
+        return `<div class="tarjeta practica" id="p-${p.id}">
+          <h3>${p.icono} ${esc(p.nombre)}</h3>
+          <div class="opciones">
+            ${p.escalones.map((e, i) => radio(ruta + ".escalon", i + 1, `<span class="num">${i + 1}</span> ${esc(e)}`)).join("")}
+            ${radio(ruta + ".escalon", 0, `<span class="num">–</span> No aplica en mi rancho`, "na")}
+          </div>
+          <label class="campo dato">El dato <span class="ayuda">${esc(p.dato)}</span></label>
+          ${texto(ruta + ".dato", "Escribe aquí", true)}
+        </div>`;
+      }).join("")}`;
+  }
+
+  function pasoRoles() {
+    const ro = r.roles;
+    const d = M5.distribucion(ro.tareas);
+    return `
+      <div class="indicacion">
+        <p>Es el mismo ejercicio que hiciste en el Módulo 1, para comparar dónde estabas, a qué te comprometiste y dónde estás hoy.</p>
+        <p style="margin:0">Ten a la mano tu libro de trabajo: al final te pido los porcentajes que anotaste al inicio.</p>
+      </div>
+
+      <div class="tarjeta">
+        <h3 style="margin-top:0">1 · Tu semana típica</h3>
+        <p>Piensa en la semana pasada (o una semana típica del último mes). Anota las tareas que hiciste o supervisaste tú, en qué rol cae cada una y cuántas horas le dedicaste.</p>
+        <details><summary style="cursor:pointer;color:var(--verde);font-weight:600">¿Qué es cada rol?</summary>
+          ${M5.roles.map(x => `<p style="margin:8px 0"><b>${x.icono} ${x.nombre}:</b> ${esc(x.ayuda)}</p>`).join("")}
+        </details>
+        <div id="tareas" style="margin-top:12px">
+          ${ro.tareas.map((t, i) => `<div class="tarea">
+            <input type="text" class="t-nombre" data-k="roles.tareas.${i}.tarea" value="${esc(t.tarea)}" placeholder="Tarea ${i + 1}">
+            ${selectorRol("roles.tareas." + i + ".rol")}
+            <input type="number" min="0" step="0.5" inputmode="decimal" data-k="roles.tareas.${i}.horas" value="${esc(t.horas)}" placeholder="Horas" aria-label="Horas a la semana">
+            <button type="button" data-quitar="${i}" title="Quitar tarea" aria-label="Quitar tarea">×</button>
+          </div>`).join("")}
+        </div>
+        <button type="button" class="boton secundario chico" id="agregar-tarea">+ Agregar tarea</button>
+        <div class="reparto" id="reparto">${repartoHTML(d)}</div>
+      </div>
+
+      <div class="tarjeta">
+        <h3 style="margin-top:0">2 · ¿En cuáles patrones estás cayendo hoy?</h3>
+        <p class="ayuda">Puedes marcar más de uno. Para cada uno, escribe un ejemplo reciente.</p>
+        <div class="opciones">
+          ${M5.patrones.map(p => {
+            const m = ro.patrones[p.id] && ro.patrones[p.id].marcado;
+            return `<div><label class="opcion${m ? " marcada" : ""}"><input type="checkbox" data-k="roles.patrones.${p.id}.marcado"${m ? " checked" : ""}>
+              <span><b>${esc(p.nombre)}.</b> ${esc(p.texto)}</span></label>
+              ${m ? `<div style="margin:6px 0 4px">${texto("roles.patrones." + p.id + ".ejemplo", "Un ejemplo de estas semanas", true)}</div>` : ""}</div>`;
+          }).join("")}
+        </div>
+      </div>
+
+      <div class="tarjeta">
+        <h3 style="margin-top:0">3 · Tu mapa de energía</h3>
+        <p class="ayuda">Contesta rápido. La primera respuesta que te venga suele ser la verdadera.</p>
+        ${M5.energia.map(e => `<label class="campo">${esc(e.pregunta)}</label>
+          <div class="opciones fila">${M5.roles.map(x => radio("roles.energia." + e.id, x.id, `${x.icono} ${x.nombre}`)).join("")}</div>`).join("")}
+      </div>
+
+      <div class="tarjeta">
+        <h3 style="margin-top:0">4 · Compara con tu Módulo 1</h3>
+        <p>Busca en tu libro de trabajo la tabla "Mi distribución comprometida" y copia los dos porcentajes.</p>
+        <label class="campo">Tu distribución al inicio del programa (%)</label>
+        <div class="tres">${M5.roles.map(x => `<label>${x.icono} ${x.nombre}<input type="number" min="0" max="100" inputmode="numeric" data-k="roles.base.${x.id}" value="${esc(ro.base[x.id])}"></label>`).join("")}</div>
+        <label class="campo">Tu compromiso a seis meses (%)</label>
+        <div class="tres">${M5.roles.map(x => `<label>${x.icono} ${x.nombre}<input type="number" min="0" max="100" inputmode="numeric" data-k="roles.compromiso.${x.id}" value="${esc(ro.compromiso[x.id])}"></label>`).join("")}</div>
+
+        <label class="campo">Las 3 cosas que te comprometiste a dejar de hacer <span class="ayuda">Cópialas de tu libro y marca si lo lograste.</span></label>
+        ${ro.dejo.map((x, i) => filaCompromiso("roles.dejo." + i)).join("")}
+        <label class="campo">Las 3 cosas que te comprometiste a empezar a hacer</label>
+        ${ro.empiezo.map((x, i) => filaCompromiso("roles.empiezo." + i)).join("")}
+
+        <label class="campo">Mirando los tres números (al inicio, compromiso y hoy), ¿qué ves?</label>
+        ${texto("roles.reflexion", "Escribe aquí", true)}
+      </div>`;
+  }
+  function filaCompromiso(ruta) {
+    const v = obtener(ruta + ".logro") || "";
+    return `<div class="compromiso">${texto(ruta + ".texto", "Escribe aquí")}
+      <select data-k="${ruta}.logro" aria-label="¿Lo lograste?">
+        <option value="">¿Lo lograste?</option>
+        <option value="si"${v === "si" ? " selected" : ""}>Sí</option>
+        <option value="medias"${v === "medias" ? " selected" : ""}>A medias</option>
+        <option value="no"${v === "no" ? " selected" : ""}>No</option>
+      </select></div>`;
+  }
+  function repartoHTML(d) {
+    if (!d) return `<p class="ayuda" style="grid-column:1/-1;margin:0">Cuando anotes horas y roles, aquí aparece tu reparto de hoy.</p>`;
+    return M5.roles.map(x => `<div>${x.icono} ${x.nombre}<b>${d[x.id]}%</b><span class="ayuda">${d.horas[x.id]} h</span></div>`).join("");
+  }
+
+  function pendientes() {
+    const faltan = [];
+    if (!r.alumno.trim()) faltan.push({ paso: 0, texto: "Tu nombre" });
+    if (!(r.negocios || []).length) faltan.push({ paso: 0, texto: "Qué negocio tienes" });
+    if (!r.momento.temporada) faltan.push({ paso: 1, texto: "En qué temporada está tu rancho" });
+    M5.practicasPara(r.negocios).forEach(p => {
+      const e = (r.practicas[p.id] || {}).escalon;
+      if (e === undefined || e === null || e === "") faltan.push({ paso: 2, texto: "Escalón de " + p.nombre, ancla: "p-" + p.id });
+    });
+    if (!M5.distribucion(r.roles.tareas)) faltan.push({ paso: 3, texto: "Las tareas y horas de tu semana (Tres Roles)" });
+    return faltan;
+  }
+
+  function pasoEnviar() {
+    const faltan = pendientes();
+    return `
+      ${faltan.length ? `<div class="aviso error"><p><b>Antes de enviar, te falta:</b></p><ul style="margin:0;padding-left:20px">
+        ${faltan.map(f => `<li><a href="#" data-ir="${f.paso}" data-ancla="${f.ancla || ""}">${esc(f.texto)}</a></li>`).join("")}</ul></div>`
+        : `<div class="indicacion"><p style="margin:0">Revisa tu hoja. Si todo está bien, envíala con el botón de abajo.</p></div>`}
+      <div class="tarjeta">
+        <label class="campo">¿Algo más que quieras decirme antes de la sesión? <span class="ayuda">Opcional</span></label>
+        ${texto("comentario", "Escribe aquí", true)}
+      </div>
+      <div id="vista">${armarHoja(r)}</div>
+      <div id="aviso-envio"></div>
+      <p style="margin-top:18px;text-align:center"><button class="boton" id="enviar" type="button"${faltan.length ? " disabled" : ""}>Enviar a Daniel</button></p>`;
+  }
+
+  const RENDER = [pasoDatos, pasoMomento, pasoPracticas, pasoRoles, pasoEnviar];
+
+  function pintarPasos() {
+    $("pasos").innerHTML = PASOS.map((p, i) =>
+      `<button type="button" data-paso="${i}" class="${i === paso ? "activo" : (i < paso ? "hecho" : "")}">${i + 1}. ${p}</button>`).join("");
+  }
+  function mostrar(n, ancla) {
+    paso = Math.max(0, Math.min(PASOS.length - 1, n));
+    $("paso").innerHTML = RENDER[paso]();
+    pintarPasos();
+    $("atras").style.visibility = paso === 0 ? "hidden" : "visible";
+    $("siguiente").style.visibility = paso === PASOS.length - 1 ? "hidden" : "visible";
+    if (ancla && $(ancla)) $(ancla).scrollIntoView({ behavior: "smooth", block: "start" });
+    else window.scrollTo(0, 0);
+  }
+
+  // ---------- Eventos ----------
+  const contenedor = $("paso");
+  function alCambiar(ev) {
+    const el = ev.target;
+    if (el.dataset.arr) {
+      const lista = new Set(r[el.dataset.arr] || []);
+      el.checked ? lista.add(el.value) : lista.delete(el.value);
+      r[el.dataset.arr] = M5.negocios.map(n => n.id).filter(id => lista.has(id));
+      el.closest(".opcion").classList.toggle("marcada", el.checked);
+      guardar(); return;
+    }
+    const ruta = el.dataset.k;
+    if (!ruta) return;
+    let valor = el.type === "checkbox" ? el.checked : el.value;
+    if (el.type === "radio" && /\.escalon$/.test(ruta)) valor = parseInt(valor, 10);
+    poner(ruta, valor);
+    guardar();
+    if (el.type === "radio") {
+      document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`).forEach(x => x.closest(".opcion").classList.toggle("marcada", x.checked));
+    }
+    if (el.type === "checkbox" && /^roles\.patrones\./.test(ruta)) {
+      const y = window.scrollY; mostrar(paso); window.scrollTo(0, y); return;
+    }
+    if (/^roles\.tareas\./.test(ruta)) $("reparto").innerHTML = repartoHTML(M5.distribucion(r.roles.tareas));
+    if (paso === PASOS.length - 1 && ruta === "comentario") $("vista").innerHTML = armarHoja(r);
+  }
+  contenedor.addEventListener("input", alCambiar);
+  contenedor.addEventListener("change", alCambiar);
+
+  contenedor.addEventListener("click", ev => {
+    const t = ev.target;
+    if (t.id === "agregar-tarea") {
+      if (r.roles.tareas.length < 30) r.roles.tareas.push({ tarea: "", rol: "", horas: "" });
+      guardar(); const y = window.scrollY; mostrar(paso); window.scrollTo(0, y); return;
+    }
+    if (t.dataset.quitar !== undefined) {
+      r.roles.tareas.splice(+t.dataset.quitar, 1);
+      if (!r.roles.tareas.length) r.roles.tareas.push({ tarea: "", rol: "", horas: "" });
+      guardar(); const y = window.scrollY; mostrar(paso); window.scrollTo(0, y); return;
+    }
+    if (t.dataset.ir !== undefined) { ev.preventDefault(); mostrar(+t.dataset.ir, t.dataset.ancla); return; }
+    if (t.id === "enviar") enviar();
+  });
+
+  $("pasos").addEventListener("click", ev => { const b = ev.target.closest("button"); if (b) mostrar(+b.dataset.paso); });
+  $("atras").addEventListener("click", () => mostrar(paso - 1));
+  $("siguiente").addEventListener("click", () => {
+    if (paso === 0 && (!r.alumno.trim() || !(r.negocios || []).length)) {
+      alert("Escribe tu nombre y marca qué negocio tienes para seguir."); return;
+    }
+    mostrar(paso + 1);
+  });
+
+  // ---------- Envío ----------
+  let sb = null;
+  try { sb = supabase.createClient(DSAH.url, DSAH.clave, { auth: { persistSession: false } }); } catch (e) { sb = null; }
+
+  async function enviar() {
+    const boton = $("enviar");
+    const aviso = $("aviso-envio");
+    if (pendientes().length) return;
+    if (!sb) { aviso.innerHTML = '<div class="aviso error">No se pudo conectar. Revisa tu internet y vuelve a intentar.</div>'; return; }
+    boton.disabled = true; boton.textContent = "Enviando...";
+    const fila = { alumno: r.alumno.trim().slice(0, 120), rancho: (r.rancho || "").trim().slice(0, 160) || null, respuestas: r };
+    const { error } = await sb.from(DSAH.tabla).insert(fila);
+    if (error) {
+      boton.disabled = false; boton.textContent = "Enviar a Daniel";
+      aviso.innerHTML = '<div class="aviso error">No se pudo enviar. Revisa tu internet y vuelve a intentar. Lo que escribiste sigue guardado.</div>';
+      return;
+    }
+    escribir(CLAVE_ENVIADA, r);
+    borrar(CLAVE_BORRADOR);
+    mostrarResultado(r, true);
+  }
+
+  function mostrarResultado(datos, recien) {
+    $("pasos").classList.add("oculto");
+    $("paso").classList.add("oculto");
+    $("navegacion").classList.add("oculto");
+    const res = $("resultado");
+    res.classList.remove("oculto");
+    res.innerHTML = `
+      <div class="${recien ? "indicacion" : "aviso"} no-imprimir">
+        <p><b>${recien ? "Listo, tu hoja le llegó a Daniel." : "Ya enviaste tu hoja desde este dispositivo."}</b></p>
+        <p style="margin:0">Guárdala en PDF para tenerla a la mano en la sesión: toca "Guardar en PDF" y en la ventana que se abre elige "Guardar como PDF".</p>
+      </div>
+      <p class="no-imprimir" style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="boton chico" id="imprimir" type="button">Guardar en PDF</button>
+        <button class="boton secundario chico" id="corregir" type="button">Corregir y volver a enviar</button>
+      </p>
+      ${armarHoja(datos)}`;
+    $("imprimir").addEventListener("click", () => window.print());
+    $("corregir").addEventListener("click", () => {
+      r = JSON.parse(JSON.stringify(datos));
+      escribir(CLAVE_BORRADOR, r);
+      res.classList.add("oculto");
+      $("pasos").classList.remove("oculto"); $("paso").classList.remove("oculto"); $("navegacion").classList.remove("oculto");
+      mostrar(0);
+    });
+    window.scrollTo(0, 0);
+  }
+
+  window.addEventListener("beforeprint", () => document.querySelectorAll("details").forEach(d => d.open = true));
+
+  // ---------- Arranque ----------
+  const enviada = leer(CLAVE_ENVIADA);
+  if (enviada && !leer(CLAVE_BORRADOR) && !params.has("nueva")) mostrarResultado(enviada, false);
+  else mostrar(0);
+})();
+</script>
+</body>
+</html>
