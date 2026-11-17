@@ -121,6 +121,128 @@
       </section>`;
   }
 
+  // ---------- Versión para pegar en el libro de trabajo (Google Docs) ----------
+  // Devuelve la hoja en HTML sencillo (títulos, negritas, listas y una tabla),
+  // que Google Docs respeta al pegar, y en texto plano como respaldo.
+  function paraLibro(r) {
+    r = r || {};
+    const m = r.momento || {};
+    const ro = r.roles || {};
+    const h = [];   // html
+    const t = [];   // texto plano
+    const titulo = (nivel, s) => { h.push(`<h${nivel}>${esc(s)}</h${nivel}>`); t.push("", s.toUpperCase()); };
+    const parrafo = (etq, val) => {
+      if (!val || !String(val).trim()) return;
+      h.push(`<p>${etq ? `<b>${esc(etq)}:</b> ` : ""}${txt(val)}</p>`);
+      t.push((etq ? etq + ": " : "") + String(val).trim());
+    };
+    const lista = items => {
+      if (!items.length) return;
+      h.push("<ul>" + items.map(i => `<li>${i.html}</li>`).join("") + "</ul>");
+      items.forEach(i => t.push("- " + i.texto));
+    };
+
+    titulo(2, "Módulo 5 · Dónde está parado mi rancho");
+    parrafo("Fecha", fechaLarga(m.fecha));
+    parrafo("Rancho", [r.rancho, r.ubicacion].filter(Boolean).join(", "));
+
+    titulo(3, "Momento del año");
+    const temp = M5.temporadas.find(x => x.id === m.temporada);
+    parrafo("Temporada", temp ? temp.nombre : "");
+    parrafo("Dejó de crecer el pasto", mes(m.dejo_de_crecer));
+    parrafo("Espero que vuelva a crecer", mes(m.vuelve_a_crecer));
+    const manejos = M5.manejos.filter(x => m.manejos && m.manejos[x.id] && m.manejos[x.id].trim())
+      .map(x => ({ html: `<b>${esc(x.nombre)}:</b> ${esc(m.manejos[x.id])}`, texto: `${x.nombre}: ${m.manejos[x.id].trim()}` }));
+    if (m.otro && m.otro.trim()) manejos.push({ html: `<b>Otro:</b> ${esc(m.otro)}`, texto: "Otro: " + m.otro.trim() });
+    if (manejos.length) { h.push("<p><b>Lo que le viene a mi hato en los próximos seis meses:</b></p>"); t.push("Lo que le viene a mi hato en los próximos seis meses:"); lista(manejos); }
+
+    titulo(3, "Hasta dónde llegó cada práctica");
+    M5.practicasPara(r.negocios).forEach(p => {
+      const resp = (r.practicas || {})[p.id] || {};
+      const e = resp.escalon;
+      const estado = e === 0 ? "no aplica" : (e ? `escalón ${e} de 4` : "sin responder");
+      h.push(`<p><b>${esc(p.nombre)}: ${estado}.</b>${e ? " " + esc(p.escalones[e - 1]) : ""}</p>`);
+      t.push("", `${p.nombre}: ${estado}.${e ? " " + p.escalones[e - 1] : ""}`);
+      if (e !== 0) parrafo("Dato", resp.dato);
+    });
+
+    titulo(3, "Diagnóstico de los Tres Roles");
+    const hoy = M5.distribucion(ro.tareas);
+    const num = v => (v === "" || v == null || isNaN(+v)) ? "" : (+v) + "%";
+    h.push("<table border=\"1\" style=\"border-collapse:collapse\"><tr><th>Rol</th><th>Al inicio</th><th>Compromiso</th><th>Hoy</th></tr>" +
+      M5.roles.map(x => `<tr><td>${x.nombre}</td><td>${num((ro.base || {})[x.id])}</td><td>${num((ro.compromiso || {})[x.id])}</td><td>${hoy ? hoy[x.id] + "%" : ""}</td></tr>`).join("") + "</table>");
+    t.push("Rol | Al inicio | Compromiso | Hoy");
+    M5.roles.forEach(x => t.push(`${x.nombre} | ${num((ro.base || {})[x.id])} | ${num((ro.compromiso || {})[x.id])} | ${hoy ? hoy[x.id] + "%" : ""}`));
+    if (hoy) parrafo("Horas a la semana en los tres roles", String(hoy.total));
+
+    const tareas = (ro.tareas || []).filter(x => x.tarea && x.tarea.trim());
+    if (tareas.length) {
+      h.push("<p><b>Mi semana típica:</b></p>"); t.push("Mi semana típica:");
+      lista(tareas.map(x => {
+        const rol = (M5.roles.find(y => y.id === x.rol) || {}).nombre || "";
+        const s = `${x.tarea.trim()}${rol ? " (" + rol + ")" : ""}${x.horas ? ", " + x.horas + " h" : ""}`;
+        return { html: esc(s), texto: s };
+      }));
+    }
+    const patrones = M5.patrones.filter(p => ro.patrones && ro.patrones[p.id] && ro.patrones[p.id].marcado)
+      .map(p => {
+        const ej = (ro.patrones[p.id].ejemplo || "").trim();
+        return { html: `<b>${esc(p.nombre)}.</b>${ej ? " " + esc(ej) : ""}`, texto: p.nombre + "." + (ej ? " " + ej : "") };
+      });
+    if (patrones.length) { h.push("<p><b>Patrones en los que caigo hoy:</b></p>"); t.push("Patrones en los que caigo hoy:"); lista(patrones); }
+    const energia = M5.energia.filter(e => (ro.energia || {})[e.id]).map(e => {
+      const rol = (M5.roles.find(y => y.id === ro.energia[e.id]) || {}).nombre || "";
+      return { html: `${esc(e.pregunta)} <b>${esc(rol)}</b>`, texto: `${e.pregunta} ${rol}` };
+    });
+    if (energia.length) { h.push("<p><b>Mi mapa de energía:</b></p>"); t.push("Mi mapa de energía:"); lista(energia); }
+    const comp = (l, etq) => {
+      const v = (l || []).filter(x => x.texto && x.texto.trim());
+      if (!v.length) return;
+      h.push(`<p><b>${etq}</b></p>`); t.push(etq);
+      lista(v.map(x => {
+        const s = x.texto.trim() + (x.logro ? ` (lo logré: ${(logroTxt[x.logro] || "").toLowerCase()})` : "");
+        return { html: esc(s), texto: s };
+      }));
+    };
+    comp(ro.dejo, "Lo que me comprometí a dejar de hacer:");
+    comp(ro.empiezo, "Lo que me comprometí a empezar a hacer:");
+    parrafo("Lo que veo al comparar", ro.reflexion);
+    if (r.comentario && r.comentario.trim()) { titulo(3, "Algo más"); parrafo("", r.comentario); }
+
+    return { html: h.join("\n"), texto: t.join("\n").replace(/^\n+/, "") };
+  }
+
+  // Copia la hoja al portapapeles con formato. Devuelve true si se pudo.
+  window.copiarParaLibro = async function (r) {
+    const { html, texto } = paraLibro(r);
+    try {
+      if (navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([texto], { type: "text/plain" }),
+        })]);
+        return true;
+      }
+    } catch (e) { /* se intenta el método viejo */ }
+    try {
+      const caja = document.createElement("div");
+      caja.contentEditable = "true";
+      caja.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+      caja.innerHTML = html;
+      document.body.appendChild(caja);
+      const rango = document.createRange();
+      rango.selectNodeContents(caja);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(rango);
+      const ok = document.execCommand("copy");
+      sel.removeAllRanges();
+      caja.remove();
+      if (ok) return true;
+    } catch (e) { /* sin portapapeles */ }
+    return false;
+  };
+  window.textoParaLibro = r => paraLibro(r).texto;
+
   window.armarHoja = function (r, opciones) {
     r = r || {};
     const o = opciones || {};

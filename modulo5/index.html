@@ -391,13 +391,23 @@
     res.innerHTML = `
       <div class="${recien ? "indicacion" : "aviso"} no-imprimir">
         <p><b>${recien ? "Listo, tu hoja le llegó a Daniel." : "Ya enviaste tu hoja desde este dispositivo."}</b></p>
-        <p style="margin:0">Guárdala en PDF para tenerla a la mano en la sesión: toca "Guardar en PDF" y en la ventana que se abre elige "Guardar como PDF".</p>
+        <p>Para pasarla a tu libro de trabajo: toca "Copiar para mi libro de trabajo", abre tu libro en la sección del Módulo 5 y pega.</p>
+        <p style="margin:0">Para tenerla a la mano en la sesión, toca "Guardar en PDF" y en la ventana que se abre elige "Guardar como PDF".</p>
       </div>
       <p class="no-imprimir" style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="boton chico" id="imprimir" type="button">Guardar en PDF</button>
+        <button class="boton chico" id="copiar" type="button">Copiar para mi libro de trabajo</button>
+        <button class="boton secundario chico" id="imprimir" type="button">Guardar en PDF</button>
         <button class="boton secundario chico" id="corregir" type="button">Corregir y volver a enviar</button>
       </p>
+      <div id="aviso-copia" class="no-imprimir"></div>
       ${armarHoja(datos)}`;
+    $("copiar").addEventListener("click", async () => {
+      const ok = await copiarParaLibro(datos);
+      $("aviso-copia").innerHTML = ok
+        ? '<div class="indicacion"><p style="margin:0"><b>Listo, ya está copiada.</b> Abre tu libro de trabajo en la sección del Módulo 5, toca donde dice que pegues tu hoja y pega.</p></div>'
+        : `<div class="aviso"><p>Tu teléfono no dejó copiar con el botón. Mantén el dedo sobre el texto de abajo, elige "Seleccionar todo", copia y pégalo en tu libro.</p>
+           <textarea readonly style="min-height:220px">${esc(textoParaLibro(datos))}</textarea></div>`;
+    });
     $("imprimir").addEventListener("click", () => window.print());
     $("corregir").addEventListener("click", () => {
       r = JSON.parse(JSON.stringify(datos));

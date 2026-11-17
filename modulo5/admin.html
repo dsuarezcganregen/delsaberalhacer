@@ -60,7 +60,8 @@
   <section id="vista-hoja" class="oculto">
     <p class="no-imprimir" style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="boton secundario chico" id="volver" type="button">← Volver a la lista</button>
-      <button class="boton chico" id="imprimir" type="button">Guardar en PDF</button>
+      <button class="boton chico" id="copiar" type="button">Copiar para su libro de trabajo</button>
+      <button class="boton secundario chico" id="imprimir" type="button">Guardar en PDF</button>
       <button class="boton secundario chico" id="borrar" type="button" style="border-color:var(--rojo);color:var(--rojo)">Borrar esta hoja</button>
     </p>
     <div id="hoja"></div>
@@ -132,6 +133,13 @@
     if (!actual) return;
     $("hoja").innerHTML = armarHoja(actual.respuestas);
     ver("vista-hoja");
+  });
+  $("copiar").addEventListener("click", async () => {
+    if (!actual) return;
+    const ok = await copiarParaLibro(actual.respuestas);
+    const b = $("copiar");
+    b.textContent = ok ? "Copiada ✓" : "No se pudo copiar";
+    setTimeout(() => { b.textContent = "Copiar para su libro de trabajo"; }, 2500);
   });
   $("volver").addEventListener("click", () => ver("vista-lista"));
   $("imprimir").addEventListener("click", () => window.print());
